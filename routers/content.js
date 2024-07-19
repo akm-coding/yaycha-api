@@ -12,6 +12,27 @@ router.get("/posts", async (req, res) => {
       orderBy: { id: "desc" },
       take: 20,
     });
+    setTimeout(() => {
+      res.json(data);
+    }, 2000);
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
+});
+
+router.get("/posts/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const data = await prisma.post.findFirst({
+      where: { id: Number(id) },
+      include: {
+        user: true,
+        comments: {
+          include: { user: true },
+        },
+      },
+    });
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e });
