@@ -11,6 +11,7 @@ async function UserSeeder() {
   for (let i = 0; i < 10; i++) {
     const firstName = faker.person.firstName();
     const lastName = faker.person.lastName();
+
     const name = `${firstName} ${lastName}`;
     const username = `${firstName}${lastName[0]}`.toLocaleLowerCase();
     const bio = faker.person.bio();
