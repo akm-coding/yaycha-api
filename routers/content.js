@@ -4,6 +4,7 @@ const router = express.Router();
 const prisma = require("../prismaClient");
 
 const { auth, isOwner } = require("../middlewares/auth");
+const { clients } = require("./ws");
 
 router.get("/posts", async (req, res) => {
   try {
@@ -104,22 +105,31 @@ router.post("/posts", auth, async (req, res) => {
 
 router.post("/comments", auth, async (req, res) => {
   const { content, postId } = req.body;
-  if (!content || !postId)
-    return res.status(400).json({ msg: "content and postId required" });
+  try {
+    if (!content || !postId)
+      return res.status(400).json({ msg: "content and postId required" });
 
-  const user = res.locals.user;
+    const user = res.locals.user;
 
-  const comment = await prisma.comment.create({
-    data: {
-      content,
-      userId: Number(user.id),
-      postId: Number(postId),
-    },
-  });
+    const comment = await prisma.comment.create({
+      data: {
+        content,
+        userId: Number(user.id),
+        postId: Number(postId),
+      },
+    });
 
-  comment.user = user;
-
-  res.json(comment);
+    comment.user = user;
+    await addNoti({
+      type: "Comment",
+      content: "reply your post",
+      postId,
+      userId: user.id,
+    });
+    res.json(comment);
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
 });
 
 router.delete("/posts/:id", auth, isOwner("post"), async (req, res) => {
@@ -150,28 +160,47 @@ router.post("/like/posts/:id", auth, async (req, res) => {
   const { id } = req.params;
   const user = res.locals.user;
 
-  const like = await prisma.postLike.create({
-    data: {
-      postId: Number(id),
-      userId: Number(user.id),
-    },
-  });
+  try {
+    const like = await prisma.postLike.create({
+      data: {
+        postId: Number(id),
+        userId: Number(user.id),
+      },
+    });
+    await addNoti({
+      type: "like",
+      content: "likes your post",
+      postId: id,
+      userId: user.id,
+    });
 
-  res.json({ like });
+    res.json({ like });
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
 });
 
 router.post("/like/comments/:id", auth, async (req, res) => {
   const { id } = req.params;
   const user = res.locals.user;
 
-  const like = await prisma.commentLike.create({
-    data: {
-      commentId: Number(id),
-      userId: Number(user.id),
-    },
-  });
-
-  res.json({ like });
+  try {
+    const like = await prisma.commentLike.create({
+      data: {
+        commentId: Number(id),
+        userId: Number(user.id),
+      },
+    });
+    await addNoti({
+      type: "like",
+      content: "likes your comment",
+      postId: id,
+      userId: user.id,
+    });
+    res.json({ like });
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
 });
 
 router.delete("/unlike/posts/:id", auth, async (req, res) => {
@@ -241,5 +270,82 @@ router.get("/likes/comments/:id", async (req, res) => {
 
   res.json(data);
 });
+
+router.get("/notis", auth, async (req, res) => {
+  const user = res.locals.user;
+
+  try {
+    const notis = await prisma.noti.findMany({
+      where: {
+        post: {
+          userId: Number(user.id),
+        },
+      },
+      include: { user: true },
+      orderBy: { id: "desc" },
+      take: 20,
+    });
+    res.json(notis);
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
+});
+
+router.put("/notis/read", auth, async (req, res) => {
+  const user = res.locals.user;
+
+  try {
+    await prisma.noti.updateMany({
+      where: {
+        post: {
+          userId: Number(user.id),
+        },
+      },
+      data: { read: true },
+    });
+    res.json({ msg: "Mark all notis read" });
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
+});
+
+router.put("/notis/read/:id", auth, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const noti = await prisma.noti.update({
+      where: { id: Number(id) },
+      data: { read: true },
+    });
+    res.json(noti);
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
+});
+
+async function addNoti({ type, content, postId, userId }) {
+  const post = await prisma.post.findUnique({
+    where: {
+      id: Number(postId),
+    },
+  });
+  if (post.userId == userId) return false;
+
+  clients.map((client) => {
+    if (client.userId == post.userId) {
+      client.ws.send(JSON.stringify({ event: "notis" }));
+      console.log(`WS: event sent to ${client.userId}: notis`);
+    }
+  });
+
+  return await prisma.noti.create({
+    data: {
+      type,
+      content,
+      postId: Number(postId),
+      userId: Number(userId),
+    },
+  });
+}
 
 module.exports = { contentRouter: router };
