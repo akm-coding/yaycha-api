@@ -63,6 +63,26 @@ router.get("/users/:id", async (req, res) => {
   }
 });
 
+router.get("/search", async (req, res) => {
+  const { q } = req.params;
+  try {
+    const data = await prisma.user.findMany({
+      where: {
+        name: {
+          contains: q,
+        },
+      },
+      include: {
+        followers: true,
+        following: true,
+      },
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e });
+  }
+});
+
 router.post("/users", async (req, res) => {
   const { name, username, bio, password } = req.body;
   try {
